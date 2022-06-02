@@ -6,7 +6,6 @@ const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
 const Meta = imports.gi.Meta;
 const Clutter = imports.gi.Clutter;
-const Layout = imports.ui.layout;
 
 const Gdk = imports.gi.Gdk;
 const GLib = imports.gi.GLib;
@@ -50,10 +49,11 @@ function getMouseHoveredWindowActor() {
   let window_actors = global.get_window_actors();
   let result = null;
   window_actors.forEach(function(actor) {
-    let xmin = actor.get_position()[0];
-    let ymin = actor.get_position()[1];
-    let xmax = xmin + actor.get_size()[0];
-    let ymax = ymin + actor.get_size()[1];
+    let fr = actor.get_meta_window().get_frame_rect();
+    let xmin = fr.x;
+    let ymin = fr.y;
+    let xmax = xmin + fr.width;
+    let ymax = ymin + fr.height;
     if(xmin < mouse_x && mouse_x < xmax && ymin < mouse_y && mouse_y < ymax) {
       result = actor;
     }
@@ -65,7 +65,7 @@ function onScroll(actor, event) {
   Log.debug("on scroll");
   win_actor = getMouseHoveredWindowActor();
   //Gnome 3.34 and above introduced MetaSurfaceActor. We need to get this actor below MetaWindowActor and apply opacity-change on it.
-  if (gnome_at_least_3_34) win_actor = win_actor.get_children()[0];
+  if (gnome_at_least_3_34) win_actor = win_actor.first_child;
   let opacity = win_actor.get_opacity();
 
   let dir = event.get_scroll_direction();
@@ -88,12 +88,17 @@ function onScroll(actor, event) {
 
 function createOverlay() {
   if(overlayExists) return;
-  Log.debug("overlay created");
+  win_actor = getMouseHoveredWindowActor();
+  if (!win_actor) return;
+  Log.debug("create overlay");
+  let meta_window = win_actor.get_meta_window();
+  let frame_rect = meta_window.get_frame_rect();
+  let pos_x = frame_rect.x;
+  let pos_y = frame_rect.y;
+  let size_x = frame_rect.width;
   overlayContainer = new St.Widget({
-    clip_to_allocation: true,
-    layout_manager: new Clutter.BinLayout()
+    clip_to_allocation: true
   });
-  overlayContainer.add_constraint(new Layout.MonitorConstraint({primary: true, work_area: true}));
   Main.layoutManager.addChrome(overlayContainer, {affectsInputRegion: false});
   
   // check gnome version to determine correct call to create new overlay 
@@ -102,10 +107,8 @@ function createOverlay() {
   } else {
     overlay = new St.Bin({ style_class: '', reactive: true, can_focus: true, x_fill: true, y_fill: false, track_hover: true });
   };
-  //TODO:support multi-monitor
-  let monitor = Main.layoutManager.primaryMonitor;
-  overlay.set_size(monitor.width, monitor.height);
-  overlay.set_position(0, 0);
+  overlay.set_position(pos_x, pos_y);
+  overlay.set_size(size_x, 40);
   sig_scroll = overlay.connect("scroll-event", onScroll);
   overlayContainer.add_actor(overlay);
   Main.layoutManager.trackChrome(overlay, {affectsInputRegion: true});
@@ -115,6 +118,7 @@ function createOverlay() {
 
 function destroyOverlay() {
   if(!overlayExists) return;
+  overlayExists = false;
   Log.debug("overlay destroyed");
   if(overlayContainer) Main.layoutManager.removeChrome(overlayContainer);
   if(overlay) Main.layoutManager.untrackChrome(overlay);
@@ -122,7 +126,6 @@ function destroyOverlay() {
   sig_scroll = null;
   if(overlay) overlay.destroy();
   if(overlayContainer) overlayContainer.destroy();
-  overlayExists = false;
 }
 
 function onHotkeyPressed() {
